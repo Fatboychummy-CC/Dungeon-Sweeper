@@ -45,6 +45,8 @@ local time = 0
 local flash_kill_timer
 
 local BOARD_FILL = 0.2 -- 20% filled with enemies?
+local PERCENT_REQUIRED_BEGIN = 0.5
+local PERCENT_REQUIRED_INCR  = 0.075
 
 ---@type Array<integer>
 local level_thresholds = {}
@@ -201,13 +203,21 @@ local function init_board()
   end
 
   local sum = 0
+  local percent_required = PERCENT_REQUIRED_BEGIN
   print("Enemies:")
   for i = 1, 9 do
-    local threshold = math.ceil(0.5 * enemy_levels[i])
+    local threshold = math.ceil(percent_required * enemy_levels[i])
     sum = sum + threshold * i
-    print(("Level:%d | Count: %2d | Diff: %2d | Total: %3d"):format(i, enemy_levels[i], threshold * i, sum))
+    print(("Level:%d | Count:%2d | %%:%.3f | Diff:%2d | Total:%3d"):format(i, enemy_levels[i], percent_required, threshold * i, sum))
+    percent_required = percent_required + PERCENT_REQUIRED_INCR
     level_thresholds[i] = sum
   end
+
+  sum = 0
+  for i = 1, 9 do
+    sum = sum + enemy_levels[i] * i
+  end
+  print("Total XP to earn:", sum)
 
   -- Create leftover nodes.
   for x = 1, w do
