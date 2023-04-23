@@ -42,7 +42,12 @@ local xp = 0
 local lvl = 1
 local time = 0
 
-local BOARD_FILL = 0.3 -- 30% filled with enemies?
+local flash_kill_timer
+
+local BOARD_FILL = 0.2 -- 20% filled with enemies?
+
+---@type Array<integer>
+local level_thresholds = {}
 
 ---@type Array<Enemy>
 local enemies = {
@@ -62,6 +67,11 @@ local box = {
   " \x95", "\x8f\x85",
   { "75", "57" },
   { "55", "77" }
+}
+local uncovered_box = {
+  "\x87\x8b", "  ",
+  { "00", "ff" },
+  { "00", "ff" }
 }
 
 --- Create a deep clone of the inserted value.
@@ -141,7 +151,7 @@ local function init_board()
 
   local total = math.floor(w * h * BOARD_FILL)
   local percentages = { --- The percentage of enemies of each level.
-    0.18,
+    0.20,
     0.15,
     0.14,
     0.13,
@@ -149,7 +159,7 @@ local function init_board()
     0.10,
     0.09,
     0.07,
-    0.03,
+    0.01,
   }
   local function sum_to(n)
     local sum = 0
@@ -163,15 +173,19 @@ local function init_board()
   local function next_level(i)
     for j = 1, #percentages do
       if i / total < sum_to(j) then
-        return j - 1
+        return j
       end
     end
 
     return 9
   end
 
+  local enemy_levels = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }
   for i = 1, total do
-    local enemy_object = deep_copy(enemies[next_level(i)])
+    local level = next_level(i)
+    level = math.min(9, math.max(level, 1))
+    local enemy_object = deep_copy(enemies[level])
+    enemy_levels[level] = enemy_levels[level] + 1
 
     -- Ensure no position is used twice. This is technically O(infinity) :)
     local pos
@@ -184,6 +198,15 @@ local function init_board()
     node.Enemy = enemy_object
 
     nodes[pos] = node
+  end
+
+  local sum = 0
+  print("Enemies:")
+  for i = 1, 9 do
+    local threshold = math.ceil(0.5 * enemy_levels[i])
+    sum = sum + threshold * i
+    print(("Level:%d | Count: %2d | Diff: %2d | Total: %3d"):format(i, enemy_levels[i], threshold * i, sum))
+    level_thresholds[i] = sum
   end
 
   -- Create leftover nodes.
@@ -223,8 +246,8 @@ local function init_enemies()
       i,
       {
         "\x8c\x8c", "  ",
-        {tostring(i):rep(2) --[[@as TextColor]], "ff" --[[@as BGColor]]},
-        {tostring(i):rep(2) --[[@as TextColor]], "ff" --[[@as BGColor]]}
+        { tostring(i):rep(2) --[[@as TextColor]], "ff" --[[@as BGColor]] },
+        { "ee" --[[@as TextColor]],               "ff" --[[@as BGColor]] }
       }
     )
   end
@@ -264,8 +287,8 @@ end
 local function flash(color)
   flash_win.setBackgroundColor(color)
   flash_win.clear()
-  sleep(0.5)
-  main_win.redraw()
+  main_win.setVisible(false)
+  flash_kill_timer = os.startTimer(0.5)
 end
 
 --- Fight an enemy (player attack, if enemy alive, attack back. Repeat until one is dead).
@@ -294,6 +317,50 @@ local function fight_enemy(enemy)
   end
 end
 
+
+local neighbour_pos = {
+  { 0,  1 },
+  { 1,  0 },
+  { 1,  1 },
+  { 0,  -1 },
+  { -1, 0 },
+  { -1, -1 },
+  { -1, 1 },
+  { 1,  -1 }
+}
+--- Get a list of neighbouring nodes of this node.
+---@param x integer The X position of this node.
+---@param y integer The Y position of this node.
+---@return Array<Node> nodes The neighbouring nodes.
+local function get_neighbours(x, y)
+  local neighbours = {}
+
+  for i = 1, #neighbour_pos do
+    local dx, dy = table.unpack(neighbour_pos[i], 1, 2)
+    local node = nodes[(x + dx) .. ":" .. (y + dy)]
+    if node then
+      table.insert(neighbours, node)
+    end
+  end
+
+  return neighbours
+end
+
+--- Get the sum of all neighbouring nodes' levels.
+---@param x integer The X position of the node to test.
+---@param y integer The Y position of the node to test.
+local function sum_neighbours(x, y)
+  local sum = 0
+
+  for _, neighbour in ipairs(get_neighbours(x, y)) do
+    if neighbour.Enemy then
+      sum = sum + neighbour.Enemy.Level
+    end
+  end
+
+  return sum
+end
+
 --- Uncover a node.
 ---@param x integer The X position to draw to.
 ---@param y integer The Y position to draw to.
@@ -312,6 +379,10 @@ local function uncover(x, y)
       fight_enemy(node.Enemy)
       draw_stats()
 
+      local sum = sum_neighbours(x, y)
+
+      node.Enemy.Object[2] = ("%2d"):format(sum)
+
       draw_object(main_win, node.Enemy.Object, x, y)
 
       if hp <= 0 then
@@ -319,6 +390,16 @@ local function uncover(x, y)
         popup_death()
         return true
       end
+    else
+      print("No enemy for this node.")
+
+      local sum = sum_neighbours(x, y)
+
+      local uncovered_clone = deep_copy(uncovered_box)
+      if sum ~= 0 then
+        uncovered_clone[2] = ("%2d"):format(sum)
+      end
+      draw_object(main_win, uncovered_clone, x, y)
     end
   end
 
@@ -338,17 +419,6 @@ local function increment(x, y)
   end
 
   draw_object(main_win, box_clone, x, y)
-end
-
---- Toggle enemy or nearby-count display.
----@param pos string The position to toggle.
-local function toggle(pos)
-  local node = nodes[pos]
-  if node.Enemy then
-    node.Toggled = not node.Toggled
-  end
-
-  --TODO: Draw the enemy again (or toggled version)
 end
 
 local console_visible = false
@@ -378,20 +448,24 @@ local function run_game()
   local timer = os.startTimer(1)
   while true do
     local event_data = table.pack(os.pullEvent())
-    if event_data[1] == "timer" and event_data[2] == timer then
-      timer = os.startTimer(1)
-      time = time + 1
-      draw_stats()
+
+    if event_data[1] == "timer" then
+      if event_data[2] == timer then
+        timer = os.startTimer(1)
+        time = time + 1
+        draw_stats()
+      elseif event_data[2] == flash_kill_timer and not console_visible then
+        main_win.setVisible(true)
+        main_win.redraw()
+      end
     elseif event_data[1] == "mouse_click" then
       local btn, x, y = table.unpack(event_data, 2, 4)
       local o_x, o_y = math.floor((x - main_w_cover + 1) / 2), math.floor(y / 2)
 
       local pos = o_x .. ":" .. o_y
-      if nodes[pos] then -- if within bounds
-        if btn == 1 then -- left-click
-          if uncovered[pos] then -- already uncovered
-            toggle(pos)
-          else -- not yet uncovered
+      if nodes[pos] then             -- if within bounds
+        if btn == 1 then             -- left-click
+          if not uncovered[pos] then -- not yet uncovered
             if uncover(o_x, o_y) then
               return
             end
@@ -411,6 +485,11 @@ local function run_game()
   end
 end
 
-
 print("Console is ready.")
-run_game()
+local ok, err = pcall(run_game)
+if not ok then
+  term.setBackgroundColor(colors.black)
+  term.clear()
+  term.setCursorPos(1, 1)
+  error(err, 0)
+end
