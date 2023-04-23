@@ -20,6 +20,8 @@
 ---@field Revealed boolean If this node has been revealed.
 ---@field Toggled boolean If this revealed enemy node has been toggled.
 ---@field GuessedLevel integer The level the player is assuming this node is. If the player's level is lower than the guessed level, it should not reveal when clicked.
+---@field X integer The X position of the node.
+---@field Y integer The Y position of the node.
 
 local term_w, term_h = term.getSize() ---@type integer, integer
 local main_w_cover, main_h_cover = term_w % 2 == 0 and 1 or 0, term_h % 2 == 0 and 1 or 0
@@ -109,12 +111,16 @@ local function create_enemy(level, object)
 end
 
 --- Create a new node object.
+---@param x integer The X position of this node.
+---@param y integer The Y position of this node.
 ---@return Node Node The node.
-local function create_node()
+local function create_node(x, y)
   return {
     Revealed = false,
     Toggled = false,
     GuessedLevel = 0,
+    X = x,
+    Y = y
   }
 end
 
@@ -196,7 +202,7 @@ local function init_board()
       pos = x .. ":" .. y
     until not nodes[pos]
 
-    local node = create_node()
+    local node = create_node(x, y)
     node.Enemy = enemy_object
 
     nodes[pos] = node
@@ -224,7 +230,7 @@ local function init_board()
     for y = 1, h do
       local pos = x .. ":" .. y
       if not nodes[pos] then
-        nodes[pos] = create_node()
+        nodes[pos] = create_node(x, y)
       end
     end
   end
@@ -399,11 +405,16 @@ end
 local function uncover(x, y)
   local pos = x .. ":" .. y
   local node = nodes[pos]
+  if not node then
+    print("Nil node passed.")
+    return false
+  end
 
   print("Uncover node at", pos, "Guessed:", node.GuessedLevel)
 
   if node.GuessedLevel <= lvl or node.GuessedLevel == 0 then
     uncovered[pos] = true
+    node.Revealed = true
     print("Node uncovered.")
     if node.Enemy then
       print("Node has enemy!")
@@ -429,6 +440,13 @@ local function uncover(x, y)
       local uncovered_clone = deep_copy(uncovered_box)
       if sum ~= 0 then
         uncovered_clone[2] = ("%2d"):format(sum)
+      else
+        -- uncover all neighbours.
+        for _, neighbour in ipairs(get_neighbours(x, y)) do
+          if not neighbour.Enemy and not neighbour.Revealed then
+            uncover(neighbour.X, neighbour.Y)
+          end
+        end
       end
       draw_object(main_win, uncovered_clone, x, y)
     end
