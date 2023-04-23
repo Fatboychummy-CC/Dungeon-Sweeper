@@ -208,7 +208,7 @@ local function init_board()
   for i = 1, 9 do
     local threshold = math.ceil(percent_required * enemy_levels[i])
     sum = sum + threshold * i
-    print(("Level:%d | Count:%2d | %%:%.3f | Diff:%2d | Total:%3d"):format(i, enemy_levels[i], percent_required, threshold * i, sum))
+    print(("Level:%d | Count:%2d | %%%3d | Diff:%3d | Total:%4d"):format(i, enemy_levels[i], percent_required * 100, threshold * i, sum))
     percent_required = percent_required + PERCENT_REQUIRED_INCR
     level_thresholds[i] = sum
   end
