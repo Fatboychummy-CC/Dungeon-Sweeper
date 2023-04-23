@@ -46,7 +46,7 @@ local flash_kill_timer
 
 local BOARD_FILL = 0.2 -- 20% filled with enemies?
 local PERCENT_REQUIRED_BEGIN = 0.5
-local PERCENT_REQUIRED_INCR  = 0.075
+local PERCENT_REQUIRED_INCR  = 0.088
 
 ---@type Array<integer>
 local level_thresholds = {}
@@ -231,7 +231,7 @@ local function init_board()
 end
 
 local function get_next_level_exp()
-  return 10
+  return level_thresholds[lvl]
 end
 
 local function draw_stats()
@@ -263,6 +263,15 @@ local function init_enemies()
   end
 end
 
+local function draw_levels()
+  for i = 1, 9 do
+    levels_win.setCursorPos(1, i * 2 - 1)
+    levels_win.blit('\x8c', tostring(i), 'f')
+    levels_win.setCursorPos(1, i * 2)
+    levels_win.blit(tostring(i), '0', 'f')
+  end
+end
+
 --- Initialize all parts of the game.
 local function init_all()
   -- Reset all values to initial values
@@ -285,6 +294,7 @@ local function init_all()
   init_enemies()
   init_board()
   draw_stats()
+  draw_levels()
 end
 
 --- Display the death screen.
@@ -323,7 +333,18 @@ local function fight_enemy(enemy)
   else
     print("Player gained", enemy.Level, "experience.")
     xp = xp + enemy.Level
-    -- levelup flash.
+
+    local leveled_up = false
+    repeat
+      if xp >= level_thresholds[lvl] then
+        lvl = lvl + 1
+        leveled_up = true
+      end
+    until xp < level_thresholds[lvl]
+
+    if leveled_up then
+      flash(colors.green)
+    end
   end
 end
 
