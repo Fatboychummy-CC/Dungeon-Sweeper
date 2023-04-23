@@ -472,10 +472,6 @@ end
 local function run_game()
   init_all()
 
-  local h = fs.open("test.txt", 'w')
-  h.write(textutils.serialize(nodes))
-  h.close()
-
   local timer = os.startTimer(1)
   while true do
     local event_data = table.pack(os.pullEvent())
