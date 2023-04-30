@@ -538,18 +538,18 @@ end
 
 local function popup_win()
   return popup(
-    term_win,
-    "You win!",
-    string.format(
-      "You won!\nDifficulty: %s\nTime: %d\nHP: %d",
-      difficulty == 1 and "Easy" or difficulty == 2 and "Medium" or difficulty == 3 and "Hard" or "Impossible",
-      time,
-      hp
-    ),
-    colors.green,
-    "\x03",
-    {"Replay", "Exit"}
-  ) == 1
+        term_win,
+        "You win!",
+        string.format(
+          "You won!\nDifficulty: %s\nTime: %d\nHP: %d",
+          difficulty == 1 and "Easy" or difficulty == 2 and "Medium" or difficulty == 3 and "Hard" or "Impossible",
+          time,
+          hp
+        ),
+        colors.green,
+        "\x03",
+        { "Replay", "Exit" }
+      ) == 1
 end
 
 --- Flash the screen a specified color.
