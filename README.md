@@ -2,7 +2,7 @@
 
 Welcome to Dungeon Sweeper, a game that runs similarly to MineSweeper.
 
-![Example game board](https://raw.githubusercontent.com/Fatboychummy-CC/Dungeon-Sweeper/main/images/example.png)
+![Example game board](images/example.png)
 
 ## How to play
 
