@@ -45,3 +45,9 @@ misclicks, and allows you to keep track of what is where.
 
 `c`: Toggle the console. Not a whole lot of use here, I use it for a bunch of
 debugging stuff.
+
+## Installation
+
+```
+wget https://raw.githubusercontent.com/Fatboychummy-CC/Dungeon-Sweeper/main/game.lua dungeon-sweeper
+```
