@@ -196,9 +196,9 @@ local function init_board()
     enemy_levels[level] = enemy_levels[level] + 1
 
     -- Ensure no position is used twice. This is technically O(infinity) :)
-    local pos
+    local pos, x, y
     repeat
-      local x, y = math.random(1, w), math.random(1, h)
+      x, y = math.random(1, w), math.random(1, h)
       pos = x .. ":" .. y
     until not nodes[pos]
 
