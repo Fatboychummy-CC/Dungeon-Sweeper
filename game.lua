@@ -23,56 +23,59 @@
 ---@field X integer The X position of the node.
 ---@field Y integer The Y position of the node.
 
+---@class Color : integer
+
+local strings = require "cc.strings"
+
 local term_w, term_h = term.getSize() ---@type integer, integer
 local main_w_cover, main_h_cover = term_w % 2 == 0 and 1 or 0, term_h % 2 == 0 and 1 or 0
+local term_win = window.create(term.current(), 1, 1, term.getSize())
 local main_win = window.create(term.current(), 1 + main_w_cover, 2, term_w - 1 - main_w_cover, term_h - 1 - main_h_cover)
 local flash_win = window.create(term.current(), 1 + main_w_cover, 2, term_w - 1 - main_w_cover, term_h - 1 - main_h_cover)
 local stats_win = window.create(term.current(), 1, 1, term_w, 1)
 local levels_win = window.create(term.current(), term_w, 2, 1, term_h - 1)
 local console_win = window.create(term.current(), 1, 1, term.getSize())
 console_win.setVisible(false)
-
-local _print = print
-local function print(...)
+local function console_print(...)
   local old = term.redirect(console_win)
-  _print(...)
+  print(...)
   term.redirect(old)
 end
 
-local hp = 30
-local xp = 0
-local lvl = 1
-local time = 0
+local hp                     = 30
+local xp                     = 0
+local lvl                    = 1
+local time                   = 0
 
 local flash_kill_timer
 
-local BOARD_FILL = 0.2 -- 20% filled with enemies?
+local board_fill             = 0.2 -- 20% filled with enemies?
 local PERCENT_REQUIRED_BEGIN = 0.5
 local PERCENT_REQUIRED_INCR  = 0.088
 
 ---@type Array<integer>
-local level_thresholds = {}
+local level_thresholds       = {}
 
 ---@type Array<Enemy>
-local enemies = {
+local enemies                = {
   {}
 }
 
 --- Stores all node information
 ---@type {[string]:Node}
-local nodes = {}
+local nodes                  = {}
 
 --- Stores which positions have been uncovered.
 ---@type {[string]:boolean?}
-local uncovered = {}
+local uncovered              = {}
 
 ---@type BoxObject
-local box = {
+local box                    = {
   " \x95", "\x8f\x85",
   { "75", "57" },
   { "55", "77" }
 }
-local uncovered_box = {
+local uncovered_box          = {
   "\x87\x8b", "  ",
   { "00", "ff" },
   { "00", "ff" }
@@ -144,7 +147,7 @@ local function init_board()
   w = math.floor(w / 2)
   h = math.floor(h / 2)
 
-  print("Init enemy width, height =", w, h)
+  console_print("Init enemy width, height =", w, h)
 
   for y = 1, h do
     for x = 1, w do
@@ -157,7 +160,7 @@ local function init_board()
   nodes = {}
   uncovered = {}
 
-  local total = math.floor(w * h * BOARD_FILL)
+  local total = math.floor(w * h * board_fill)
   local percentages = { --- The percentage of enemies of each level.
     0.20,
     0.15,
@@ -210,11 +213,12 @@ local function init_board()
 
   local sum = 0
   local percent_required = PERCENT_REQUIRED_BEGIN
-  print("Enemies:")
+  console_print("Enemies:")
   for i = 1, 9 do
     local threshold = math.ceil(percent_required * enemy_levels[i])
     sum = sum + threshold * i
-    print(("Level:%d | Count:%2d | %%%3d | Diff:%3d | Total:%4d"):format(i, enemy_levels[i], percent_required * 100, threshold * i, sum))
+    console_print(("Level:%d | Count:%2d | %%%3d | Diff:%3d | Total:%4d"):format(i, enemy_levels[i], percent_required * 100,
+    threshold * i, sum))
     percent_required = percent_required + PERCENT_REQUIRED_INCR
     level_thresholds[i] = sum
   end
@@ -223,7 +227,7 @@ local function init_board()
   for i = 1, 9 do
     sum = sum + enemy_levels[i] * i
   end
-  print("Total XP to earn:", sum)
+  console_print("Total XP to earn:", sum)
 
   -- Create leftover nodes.
   for x = 1, w do
@@ -279,7 +283,7 @@ local function draw_levels()
 end
 
 --- Initialize all parts of the game.
-local function init_all()
+local function init_all(difficulty)
   -- Reset all values to initial values
   hp = 30
   xp = 0
@@ -296,6 +300,9 @@ local function init_all()
   main_win.setBackgroundColor(colors.red)
   main_win.clear()
 
+  -- Set difficulty (amount of enemies)
+  board_fill = difficulty == 1 and 0.1 or difficulty == 2 and 0.2 or difficulty == 3 and 0.35 or 1
+
   -- initialize the board and stats
   init_enemies()
   init_board()
@@ -303,9 +310,224 @@ local function init_all()
   draw_levels()
 end
 
+--- Draw a box to the given terminal object.
+---@param t_obj table The terminal object.
+---@param x integer The X position of the top left point of the box.
+---@param y integer The Y position of the top left point of the box.
+---@param w integer The width of the box.
+---@param h integer The height of the box.
+---@param color Color The color to set.
+local function draw_box(t_obj, x, y, w, h, color)
+  t_obj.setBackgroundColor(color)
+  local txt = string.rep(' ', w)
+  for _y = y, y + h - 1 do
+    t_obj.setCursorPos(x, _y)
+    t_obj.write(txt)
+  end
+end
+
+--- Popup a message to the player.
+---@param title string The title of the popup box.
+---@param body string The body text of the popup box.
+---@param color Color The color to use for the icon.
+---@param char string The icon character.
+---@param options Array<string>? The options to use.
+---@return
+local function popup(t_obj, title, body, color, char, options)
+  options = options or { "Okay" }
+
+  local w, h = t_obj.getSize()
+  t_obj.setBackgroundColor(colors.black)
+  t_obj.clear()
+
+  --]==] Ensure the max height of the body of text is 5 lines
+  local function wrap(body_text, wrap_width)
+    local lines
+
+    -- first try checking if it's possible to fit in 5 lines.
+    repeat
+      wrap_width = wrap_width + 1
+      lines = strings.wrap(body_text, wrap_width)
+    until #lines <= 5 or wrap_width > (w - 2)
+
+    -- if not, shorten the text.
+    if wrap_width > w - 2 then
+      wrap_width = w - 4
+      repeat
+        body_text = body_text:sub(1, -6) .. "..."
+        lines = strings.wrap(body_text, wrap_width)
+      until #lines <= 5
+    end
+
+    -- strings.wrap for some reason keeps spaces at the end of lines, remove them.
+    for i, line in ipairs(lines) do
+      if line:sub(-1) == ' ' then
+        lines[i] = line:sub(1, -2)
+      end
+    end
+
+    return lines, wrap_width
+  end
+
+  local lines, wrapWidth = wrap(body, 20)
+
+  -- so now we have width and height of the text, let's figure out the buttons.
+  local nOptions = #options
+  local minimumRequiredWidth = nOptions *
+  4                                         -- each button is one wider than the text, and minimum one space between them.
+  for i = 1, nOptions do
+    minimumRequiredWidth = minimumRequiredWidth + #options[i]
+  end
+
+  if minimumRequiredWidth > w then
+    error("Pop-up options are too long to fit on screen.", 2)
+  elseif minimumRequiredWidth > wrapWidth then
+    -- we need to re-wrap at the new width.
+    lines = wrap(body, minimumRequiredWidth)
+    wrapWidth = minimumRequiredWidth
+  end
+  -- button_height + #lines + info_line + padding + top_bottom
+  local totalHeight = 3 + #lines + 1 + 2 + 2
+  -- wrapWidth + side_padding
+  local totalWidth = wrapWidth + 4
+  local topLeftPos = {
+    math.floor(w / 2 - totalWidth / 2 + 0.5),
+    math.floor(h / 2 - totalHeight / 2 + 0.5)
+  }
+
+  -- draw top gray line
+  draw_box(t_obj, topLeftPos[1], topLeftPos[2], totalWidth, 1, colors.gray)
+  term.setCursorPos(topLeftPos[1] + 2, topLeftPos[2])
+  term.setBackgroundColor(colors.gray)
+  term.setTextColor(colors.white)
+  term.write(title)
+
+  -- draw
+  draw_box(t_obj, topLeftPos[1], topLeftPos[2] + 1, totalWidth, totalHeight - 1, colors.lightGray)
+  draw_box(t_obj, topLeftPos[1] + 1, topLeftPos[2] + 1, totalWidth - 2, totalHeight - 2, colors.white)
+  term.setBackgroundColor(color)
+  term.setCursorPos(topLeftPos[1], topLeftPos[2])
+  term.write(char)
+
+  term.setBackgroundColor(colors.white)
+  term.setTextColor(colors.black)
+  for i = 1, #lines do
+    term.setCursorPos(topLeftPos[1] + 2, topLeftPos[2] + 1 + i)
+    term.write(lines[i])
+  end
+
+  local function makeColors(fg, bg)
+    return {
+      topLeft  = { string.char(0x97), fg, bg },
+      top      = { string.char(0x83), fg, bg },
+      topRight = { string.char(0x94), bg, fg },
+      left     = { string.char(0x95), fg, bg },
+      right    = { string.char(0x95), bg, fg },
+      botLeft  = { string.char(0x8A), bg, fg },
+      botRight = { string.char(0x85), bg, fg },
+      bot      = { string.char(0x8F), bg, fg },
+      mid      = bg
+    }
+  end
+
+  local function makeButton(item, topLeft, top, topRight, left, right, botLeft, botRight, bot, mid)
+    local working = {}
+    working[1] = {
+      table.concat { topLeft[1], top[1]:rep(#item), topRight[1] },
+      table.concat { topLeft[2], top[2]:rep(#item), topRight[2] },
+      table.concat { topLeft[3], top[3]:rep(#item), topRight[3] }
+    }
+    working[2] = {
+      table.concat { left[1], item, right[1] },
+      table.concat { left[2], ('f'):rep(#item), right[2] },
+      table.concat { left[3], mid:rep(#item), right[3] }
+    }
+    working[3] = {
+      table.concat { botLeft[1], bot[1]:rep(#item), botRight[1] },
+      table.concat { botLeft[2], bot[2]:rep(#item), botRight[2] },
+      table.concat { botLeft[3], bot[3]:rep(#item), botRight[3] }
+    }
+    return working
+  end
+
+  local clickMap
+
+  local function redrawButtons(fg, bg, sel, fgS, bgS)
+    -- buttons
+    local selected = makeColors(fgS, bgS)
+    local unselected = makeColors(fg, bg)
+
+    local buttons = {}
+    for i, item in ipairs(options) do
+      if sel and sel == i then
+        buttons[i] = makeButton(item,
+          selected.topLeft, selected.top, selected.topRight, selected.left,
+          selected.right, selected.botLeft, selected.botRight, selected.bot,
+          selected.mid
+        )
+      else
+        buttons[i] = makeButton(item,
+          unselected.topLeft, unselected.top, unselected.topRight,
+          unselected.left, unselected.right, unselected.botLeft,
+          unselected.botRight, unselected.bot, unselected.mid
+        )
+      end
+    end
+
+    local preskip = 0
+    local leftButtonPos = math.floor(w / 2 - minimumRequiredWidth / 2 + 0.5)
+    clickMap = {}
+    for i = 1, #buttons do
+      for j = 1, 3 do
+        local x, y = preskip + leftButtonPos + 2, topLeftPos[2] + 2 + #lines + j
+        if not clickMap[y] then clickMap[y] = {} end
+        term.setCursorPos(x, y)
+        term.blit(buttons[i][j][1], buttons[i][j][2], buttons[i][j][3])
+        for X = 1, #buttons[i][1][1] do
+          clickMap[y][x - 1 + X] = i
+        end
+      end
+      preskip = preskip + #buttons[i][1][1] + 1
+    end
+  end
+
+  redrawButtons('7', '0')
+  term.setCursorPos(1, 1)
+  while true do
+    local event, btn, x, y = os.pullEvent()
+    if event == "mouse_up" and btn == 1 then
+      if clickMap[y] and clickMap[y][x] then
+        return clickMap[y][x]
+      else
+        redrawButtons('7', '0')
+        term.setCursorPos(1, 1)
+      end
+    elseif (event == "mouse_click" or event == "mouse_drag") and btn == 1 then
+      if clickMap[y] and clickMap[y][x] then
+        redrawButtons('7', '0', clickMap[y][x], '9', '0')
+      else
+        redrawButtons('7', '0')
+      end
+    elseif (event == "mouse_move") then
+      if y and clickMap[y] and clickMap[y][x] then
+        redrawButtons('7', '0', clickMap[y][x], 'f', '8')
+      else
+        redrawButtons('7', '0')
+      end
+    end
+  end
+end
+
 --- Display the death screen.
 local function popup_death()
-  error("You died.") --TODO make this not temporary.
+  return popup(
+        term_win,
+        "You died",
+        "You have died. Do you wish to retry?",
+        colors.red,
+        "\x1e",
+        { "Yes", "No" }
+      ) == 1
 end
 
 --- Flash the screen a specified color.
@@ -330,14 +552,14 @@ local function fight_enemy(enemy)
 
   -- player took damage
   if hp < before then
-    print("Player took", before - hp, "damage.")
+    console_print("Player took", before - hp, "damage.")
     flash(colors.red)
   end
 
   if hp <= 0 then
     hp = 0
   else
-    print("Player gained", enemy.Level, "experience.")
+    console_print("Player gained", enemy.Level, "experience.")
     xp = xp + enemy.Level
 
     local leveled_up = false
@@ -402,22 +624,23 @@ end
 ---@param x integer The X position to draw to.
 ---@param y integer The Y position to draw to.
 ---@return boolean died If the player died as a result of uncovering this node.
+---@return boolean? replay If the player wishes to replay (only returned on death).
 local function uncover(x, y)
   local pos = x .. ":" .. y
   local node = nodes[pos]
   if not node then
-    print("Nil node passed.")
+    console_print("Nil node passed.")
     return false
   end
 
-  print("Uncover node at", pos, "Guessed:", node.GuessedLevel)
+  console_print("Uncover node at", pos, "Guessed:", node.GuessedLevel)
 
   if node.GuessedLevel <= lvl or node.GuessedLevel == 0 then
     uncovered[pos] = true
     node.Revealed = true
-    print("Node uncovered.")
+    console_print("Node uncovered.")
     if node.Enemy then
-      print("Node has enemy!")
+      console_print("Node has enemy!")
       fight_enemy(node.Enemy)
       draw_stats()
 
@@ -429,11 +652,10 @@ local function uncover(x, y)
 
       if hp <= 0 then
         sleep(2)
-        popup_death()
-        return true
+        return true, popup_death()
       end
     else
-      print("No enemy for this node.")
+      console_print("No enemy for this node.")
 
       local sum = sum_neighbours(x, y)
 
@@ -487,10 +709,23 @@ local function toggle_console()
   console_visible = not console_visible
 end
 
-local function run_game()
-  init_all()
+local function set_visibility()
+  console_win.setVisible(false)
+  main_win.setVisible(true)
+  stats_win.setVisible(true)
+  levels_win.setVisible(true)
+  console_visible = false
+  console_win.redraw()
+  main_win.redraw()
+  stats_win.redraw()
+  levels_win.redraw()
+end
 
+--- Play the game.
+---@return boolean? replay If the player wanted to replay.
+local function run_game()
   local timer = os.startTimer(1)
+  set_visibility()
   while true do
     local event_data = table.pack(os.pullEvent())
 
@@ -511,8 +746,9 @@ local function run_game()
       if nodes[pos] then             -- if within bounds
         if btn == 1 then             -- left-click
           if not uncovered[pos] then -- not yet uncovered
-            if uncover(o_x, o_y) then
-              return
+            local died, replay = uncover(o_x, o_y)
+            if died then
+              return replay
             end
           end
         elseif btn == 2 then -- right-click
@@ -530,8 +766,75 @@ local function run_game()
   end
 end
 
-print("Console is ready.")
-local ok, err = pcall(run_game)
+local function info()
+  console_print("Displaying game information.")
+
+  local txt = {
+    "How to play:",
+    "",
+    "The game is played very similarly to MineSweeper, however instead of displaying the amount of bombs around the tile, this game displays the total *levels* of enemies around the tile.",
+    "For example, if you uncover a tile with the number '3' on it, there could be one level 3 enemy next to the tile, or perhaps one level 1 and one level 2, or maybe even three level 1 enemies.",
+    "",
+    "Your current level is displayed at the top of the screen, along with your health, XP, and 'NL' -- the XP required for the next level.",
+    "",
+    "Enemies have their level in health, and deal damage equal to their health.",
+    "When uncovering a tile. You attack first for your level damage. If the enemy survives, it attacks you for its level damage. This repeats until one of you dies.",
+    "Uncover all tiles to win."
+  }
+  local text = table.concat(txt, '\n')
+
+  term_win.setBackgroundColor(colors.black)
+  term_win.setTextColor(colors.white)
+  term_win.clear()
+  term_win.setCursorPos(1, 1)
+  local old = term.redirect(term_win)
+
+  textutils.pagedPrint(text)
+  sleep(1)
+  term_win.setTextColor(colors.yellow)
+  print()
+  write("Press any key to return to the menu.")
+  
+  term.redirect(old)
+  os.pullEvent("key")
+end
+
+console_print("Console is ready.")
+local function main()
+  while true do
+    local option = popup(
+      term_win,
+      "Dungeon Sweeper",
+      "Select an option.",
+      colors.blue,
+      "\x04",
+      {"Play", "Info", "Exit"}
+    )
+
+    if option == 1 then -- Play game
+      local difficulty = popup(
+        term_win,
+        "Start Game",
+        "Select a difficulty.",
+        colors.green,
+        "\x10",
+        { "Easy", "Medium", "Hard", "Impossible" }
+      )
+
+      init_all(difficulty)
+
+      local replay = run_game()
+
+      if not replay then return end
+    elseif option == 2 then -- Info
+      info()
+    elseif option == 3 then -- Exit
+      return
+    end
+  end
+end
+
+local ok, err = pcall(main)
 if not ok then
   term.setBackgroundColor(colors.black)
   term.clear()
