@@ -46,12 +46,14 @@ local hp                     = 30
 local xp                     = 0
 local lvl                    = 1
 local time                   = 0
+local n_uncovered            = 0
+local difficulty             = 1
 
 local flash_kill_timer
 
 local board_fill             = 0.2 -- 20% filled with enemies?
 local PERCENT_REQUIRED_BEGIN = 0.5
-local PERCENT_REQUIRED_INCR  = 0.088
+local percent_required_incr  = 0.088
 
 ---@type Array<integer>
 local level_thresholds       = {}
@@ -217,11 +219,13 @@ local function init_board()
   for i = 1, 9 do
     local threshold = math.ceil(percent_required * enemy_levels[i])
     sum = sum + threshold * i
-    console_print(("Level:%d | Count:%2d | %%%3d | Diff:%3d | Total:%4d"):format(i, enemy_levels[i], percent_required * 100,
-    threshold * i, sum))
-    percent_required = percent_required + PERCENT_REQUIRED_INCR
+    console_print(("Level:%d | Count:%2d | %%%3d | Diff:%3d | Total:%4d"):format(i, enemy_levels[i],
+      percent_required * 100,
+      threshold * i, sum))
+    percent_required = percent_required + percent_required_incr
     level_thresholds[i] = sum
   end
+  level_thresholds[10] = 10000000
 
   sum = 0
   for i = 1, 9 do
@@ -283,12 +287,13 @@ local function draw_levels()
 end
 
 --- Initialize all parts of the game.
-local function init_all(difficulty)
+local function init_all()
   -- Reset all values to initial values
   hp = 30
   xp = 0
   lvl = 1
   time = 0
+  n_uncovered = 0
 
   -- clear terminal
   term.setBackgroundColor(colors.gray)
@@ -302,6 +307,7 @@ local function init_all(difficulty)
 
   -- Set difficulty (amount of enemies)
   board_fill = difficulty == 1 and 0.1 or difficulty == 2 and 0.2 or difficulty == 3 and 0.35 or 1
+  percent_required_incr = difficulty == 1 and 0.06 or difficulty == 2 and 0.07 or difficulty == 3 and 0.088 or 0.095
 
   -- initialize the board and stats
   init_enemies()
@@ -332,7 +338,7 @@ end
 ---@param color Color The color to use for the icon.
 ---@param char string The icon character.
 ---@param options Array<string>? The options to use.
----@return
+---@return integer selected The option selected.
 local function popup(t_obj, title, body, color, char, options)
   options = options or { "Okay" }
 
@@ -373,8 +379,8 @@ local function popup(t_obj, title, body, color, char, options)
 
   -- so now we have width and height of the text, let's figure out the buttons.
   local nOptions = #options
-  local minimumRequiredWidth = nOptions *
-  4                                         -- each button is one wider than the text, and minimum one space between them.
+  -- each button is one wider than the text, and minimum one space between them.
+  local minimumRequiredWidth = nOptions * 4
   for i = 1, nOptions do
     minimumRequiredWidth = minimumRequiredWidth + #options[i]
   end
@@ -530,6 +536,22 @@ local function popup_death()
       ) == 1
 end
 
+local function popup_win()
+  return popup(
+    term_win,
+    "You win!",
+    string.format(
+      "You won!\nDifficulty: %s\nTime: %d\nHP: %d",
+      difficulty == 1 and "Easy" or difficulty == 2 and "Medium" or difficulty == 3 and "Hard" or "Impossible",
+      time,
+      hp
+    ),
+    colors.green,
+    "\x03",
+    {"Replay", "Exit"}
+  ) == 1
+end
+
 --- Flash the screen a specified color.
 ---@param color integer The color to flash.
 local function flash(color)
@@ -620,22 +642,31 @@ local function sum_neighbours(x, y)
   return sum
 end
 
+local mw_w, mw_h = main_win.getSize()
+mw_w = math.floor(mw_w / 2)
+mw_h = math.floor(mw_h / 2)
+
 --- Uncover a node.
 ---@param x integer The X position to draw to.
 ---@param y integer The Y position to draw to.
 ---@return boolean died If the player died as a result of uncovering this node.
----@return boolean? replay If the player wishes to replay (only returned on death).
+---@return boolean won If the player won as a result of uncovering this node.
+---@return boolean? replay If the player wishes to replay (only returned on death or win).
 local function uncover(x, y)
   local pos = x .. ":" .. y
   local node = nodes[pos]
   if not node then
     console_print("Nil node passed.")
-    return false
+    return false, false
   end
 
   console_print("Uncover node at", pos, "Guessed:", node.GuessedLevel)
 
   if node.GuessedLevel <= lvl or node.GuessedLevel == 0 then
+    if not uncovered[pos] then
+      n_uncovered = n_uncovered + 1
+      console_print("Uncovered now:", n_uncovered)
+    end
     uncovered[pos] = true
     node.Revealed = true
     console_print("Node uncovered.")
@@ -652,7 +683,9 @@ local function uncover(x, y)
 
       if hp <= 0 then
         sleep(2)
-        return true, popup_death()
+        return true, false, popup_death()
+      elseif hp > 0 and n_uncovered >= mw_w * mw_h then
+        return false, true, popup_win()
       end
     else
       console_print("No enemy for this node.")
@@ -674,7 +707,11 @@ local function uncover(x, y)
     end
   end
 
-  return false
+  if n_uncovered >= mw_w * mw_h then
+    return false, true, popup_win()
+  end
+
+  return false, false
 end
 
 --- Increment the guessed level at the given node position. Returns to 0 after 9.
@@ -746,8 +783,8 @@ local function run_game()
       if nodes[pos] then             -- if within bounds
         if btn == 1 then             -- left-click
           if not uncovered[pos] then -- not yet uncovered
-            local died, replay = uncover(o_x, o_y)
-            if died then
+            local died, won, replay = uncover(o_x, o_y)
+            if died or won then
               return replay
             end
           end
@@ -794,7 +831,7 @@ local function info()
   term_win.setTextColor(colors.yellow)
   print()
   write("Press any key to return to the menu.")
-  
+
   term.redirect(old)
   os.pullEvent("key")
 end
@@ -808,11 +845,11 @@ local function main()
       "Select an option.",
       colors.blue,
       "\x04",
-      {"Play", "Info", "Exit"}
+      { "Play", "Info", "Exit" }
     )
 
     if option == 1 then -- Play game
-      local difficulty = popup(
+      difficulty = popup(
         term_win,
         "Start Game",
         "Select a difficulty.",
@@ -821,7 +858,7 @@ local function main()
         { "Easy", "Medium", "Hard", "Impossible" }
       )
 
-      init_all(difficulty)
+      init_all()
 
       local replay = run_game()
 
